@@ -12,6 +12,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public final class CrudGenerationService {
@@ -81,7 +82,7 @@ public final class CrudGenerationService {
         String entityName = entityClass.getName();
         String serviceName = config.serviceName();
         String controllerName = config.controllerName();
-        String basePath = entityName.toLowerCase() + "s";
+        String basePath = entityName.toLowerCase(Locale.getDefault()) + "s";
         String dtoName = entityName + "Dto";
 
         List<PsiField> nonIdFields = getRelevantFields(entityClass, false);
@@ -93,48 +94,69 @@ public final class CrudGenerationService {
         String createCmdFqn = config.servicePackage() + ".Create" + entityName + "Cmd";
         String updateCmdFqn = config.servicePackage() + ".Update" + entityName + "Cmd";
 
-        String text = "package " + config.controllerPackage() + ";\n\n"
-                + "import " + dtoFqn + ";\n"
-                + "import " + serviceFqn + ";\n"
-                + "import " + createCmdFqn + ";\n"
-                + "import " + updateCmdFqn + ";\n"
-                + "import org.springframework.http.ResponseEntity;\n"
-                + "import org.springframework.web.bind.annotation.*;\n\n"
-                + "import java.util.List;\n\n"
-                + "@RestController\n"
-                + "@RequestMapping(\"/" + basePath + "\")\n"
-                + "public class " + controllerName + " {\n\n"
-                + "    private final " + serviceName + " service;\n\n"
-                + "    public " + controllerName + "(" + serviceName + " service) {\n"
-                + "        this.service = service;\n"
-                + "    }\n\n"
-                + "    @GetMapping\n"
-                + "    public List<" + dtoName + "> getAll() {\n"
-                + "        return service.findAll();\n"
-                + "    }\n\n"
-                + "    @GetMapping(\"/{id}\")\n"
-                + "    public ResponseEntity<" + dtoName + "> getById(@PathVariable Long id) {\n"
-                + "        return service.findById(id)\n"
-                + "                .map(ResponseEntity::ok)\n"
-                + "                .orElse(ResponseEntity.notFound().build());\n"
-                + "    }\n\n"
-                + "    @PostMapping\n"
-                + "    public " + dtoName + " create(@RequestBody Create" + entityName + "Request request) {\n"
-                + "        return service.create(" + createCmdCall + ");\n"
-                + "    }\n\n"
-                + "    @PutMapping(\"/{id}\")\n"
-                + "    public ResponseEntity<" + dtoName + "> update(@PathVariable Long id,"
-                + " @RequestBody Update" + entityName + "Request request) {\n"
-                + "        return service.update(id, " + updateCmdCall + ")\n"
-                + "                .map(ResponseEntity::ok)\n"
-                + "                .orElse(ResponseEntity.notFound().build());\n"
-                + "    }\n\n"
-                + "    @DeleteMapping(\"/{id}\")\n"
-                + "    public ResponseEntity<Void> delete(@PathVariable Long id) {\n"
-                + "        service.deleteById(id);\n"
-                + "        return ResponseEntity.noContent().build();\n"
-                + "    }\n"
-                + "}\n";
+        String text = """
+                package %s;
+
+                import %s;
+                import %s;
+                import %s;
+                import %s;
+                import jakarta.validation.Valid;
+                import org.springframework.http.ResponseEntity;
+                import org.springframework.web.bind.annotation.*;
+
+                import java.util.List;
+
+                @RestController
+                @RequestMapping("/%s")
+                class %s {
+
+                    private final %s service;
+
+                    %s(%s service) {
+                        this.service = service;
+                    }
+
+                    @GetMapping
+                    List<%s> getAll() {
+                        return service.findAll();
+                    }
+
+                    @GetMapping("/{id}")
+                    ResponseEntity<%s> getById(@PathVariable Long id) {
+                        return service.findById(id)
+                                .map(ResponseEntity::ok)
+                                .orElse(ResponseEntity.notFound().build());
+                    }
+
+                    @PostMapping
+                    %s create(@RequestBody @Valid Create%sRequest request) {
+                        return service.create(%s);
+                    }
+
+                    @PutMapping("/{id}")
+                    ResponseEntity<%s> update(@PathVariable Long id, @RequestBody @Valid Update%sRequest request) {
+                        return service.update(id, %s)
+                                .map(ResponseEntity::ok)
+                                .orElse(ResponseEntity.notFound().build());
+                    }
+
+                    @DeleteMapping("/{id}")
+                    ResponseEntity<Void> delete(@PathVariable Long id) {
+                        service.deleteById(id);
+                        return ResponseEntity.noContent().build();
+                    }
+                }
+                """.formatted(
+                config.controllerPackage(),
+                dtoFqn, serviceFqn, createCmdFqn, updateCmdFqn,
+                basePath, controllerName,
+                serviceName,
+                controllerName, serviceName,
+                dtoName,
+                dtoName,
+                dtoName, entityName, createCmdCall,
+                dtoName, entityName, updateCmdCall);
 
         createJavaFile(project, dir, controllerName, text);
     }
@@ -157,43 +179,74 @@ public final class CrudGenerationService {
         String dtoFqn = entityPackage(entityClass) + "." + dtoName;
         String repositoryFqn = config.repositoryPackage() + "." + repositoryName;
 
-        String text = "package " + config.servicePackage() + ";\n\n"
-                + "import " + entityClass.getQualifiedName() + ";\n"
-                + "import " + dtoFqn + ";\n"
-                + "import " + repositoryFqn + ";\n"
-                + "import org.springframework.stereotype.Service;\n\n"
-                + "import java.util.List;\n"
-                + "import java.util.Optional;\n\n"
-                + "@Service\n"
-                + "public class " + serviceName + " {\n\n"
-                + "    private final " + repositoryName + " repository;\n\n"
-                + "    public " + serviceName + "(" + repositoryName + " repository) {\n"
-                + "        this.repository = repository;\n"
-                + "    }\n\n"
-                + "    public List<" + dtoName + "> findAll() {\n"
-                + "        return repository.findAll().stream().map(this::toDto).toList();\n"
-                + "    }\n\n"
-                + "    public Optional<" + dtoName + "> findById(Long id) {\n"
-                + "        return repository.findById(id).map(this::toDto);\n"
-                + "    }\n\n"
-                + "    public " + dtoName + " create(Create" + entityName + "Cmd cmd) {\n"
-                + "        " + entityName + " entity = new " + entityName + "();\n"
-                + createEntityMapping
-                + "        return toDto(repository.save(entity));\n"
-                + "    }\n\n"
-                + "    public Optional<" + dtoName + "> update(Long id, Update" + entityName + "Cmd cmd) {\n"
-                + "        return repository.findById(id).map(entity -> {\n"
-                + updateEntityMapping
-                + "            return toDto(repository.save(entity));\n"
-                + "        });\n"
-                + "    }\n\n"
-                + "    public void deleteById(Long id) {\n"
-                + "        repository.deleteById(id);\n"
-                + "    }\n\n"
-                + "    private " + dtoName + " toDto(" + entityName + " entity) {\n"
-                + "        return " + toDtoCall + ";\n"
-                + "    }\n"
-                + "}\n";
+        String text = """
+                package %s;
+
+                import %s;
+                import %s;
+                import %s;
+                import org.springframework.stereotype.Service;
+                import org.springframework.transaction.annotation.Transactional;
+
+                import java.util.List;
+                import java.util.Optional;
+
+                @Service
+                public class %s {
+
+                    private final %s repository;
+
+                    public %s(%s repository) {
+                        this.repository = repository;
+                    }
+
+                    @Transactional(readOnly = true)
+                    public List<%s> findAll() {
+                        return repository.findAll().stream().map(this::toDto).toList();
+                    }
+
+                    @Transactional(readOnly = true)
+                    public Optional<%s> findById(Long id) {
+                        return repository.findById(id).map(this::toDto);
+                    }
+
+                    @Transactional
+                    public %s create(Create%sCmd cmd) {
+                        %s entity = new %s();
+                %s        return toDto(repository.save(entity));
+                    }
+
+                    @Transactional
+                    public Optional<%s> update(Long id, Update%sCmd cmd) {
+                        return repository.findById(id).map(entity -> {
+                %s            return toDto(repository.save(entity));
+                        });
+                    }
+
+                    @Transactional
+                    public void deleteById(Long id) {
+                        repository.deleteById(id);
+                    }
+
+                    private %s toDto(%s entity) {
+                        return %s;
+                    }
+                }
+                """.formatted(
+                config.servicePackage(),
+                entityClass.getQualifiedName(), dtoFqn, repositoryFqn,
+                serviceName,
+                repositoryName,
+                serviceName, repositoryName,
+                dtoName,
+                dtoName,
+                dtoName, entityName,
+                entityName, entityName,
+                createEntityMapping,
+                dtoName, entityName,
+                updateEntityMapping,
+                dtoName, entityName,
+                toDtoCall);
 
         createJavaFile(project, dir, serviceName, text);
     }
@@ -205,12 +258,19 @@ public final class CrudGenerationService {
                 .map(f -> f.getType().getPresentableText())
                 .orElse("Long");
 
-        String text = "package " + config.repositoryPackage() + ";\n\n"
-                + "import " + entityClass.getQualifiedName() + ";\n"
-                + "import org.springframework.data.jpa.repository.JpaRepository;\n\n"
-                + "public interface " + config.repositoryName()
-                + " extends JpaRepository<" + entityName + ", " + idType + "> {\n"
-                + "}\n";
+        String text = """
+                package %s;
+
+                import %s;
+                import org.springframework.data.jpa.repository.JpaRepository;
+
+                public interface %s extends JpaRepository<%s, %s> {
+                }
+                """.formatted(
+                config.repositoryPackage(),
+                entityClass.getQualifiedName(),
+                config.repositoryName(),
+                entityName, idType);
 
         createJavaFile(project, dir, config.repositoryName(), text);
     }
@@ -251,8 +311,11 @@ public final class CrudGenerationService {
             // can resolve each type and add the required imports automatically.
             components.append(f.getType().getCanonicalText()).append(" ").append(f.getName());
         }
-        return "package " + pkg + ";\n\n"
-                + "public record " + className + "(" + components + ") {}\n";
+        return """
+                package %s;
+
+                public record %s(%s) {}
+                """.formatted(pkg, className, components);
     }
 
     /**
