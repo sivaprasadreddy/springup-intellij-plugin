@@ -93,6 +93,9 @@ public final class CrudGenerationService {
         String serviceFqn = config.servicePackage() + "." + serviceName;
         String createCmdFqn = config.servicePackage() + ".Create" + entityName + "Cmd";
         String updateCmdFqn = config.servicePackage() + ".Update" + entityName + "Cmd";
+        String idType = Optional.ofNullable(findIdField(entityClass))
+                .map(f -> f.getType().getPresentableText())
+                .orElse("Long");
 
         String text = """
                 package %s;
@@ -123,7 +126,7 @@ public final class CrudGenerationService {
                     }
 
                     @GetMapping("/{id}")
-                    ResponseEntity<%s> getById(@PathVariable Long id) {
+                    ResponseEntity<%s> getById(@PathVariable %s id) {
                         return service.findById(id)
                                 .map(ResponseEntity::ok)
                                 .orElse(ResponseEntity.notFound().build());
@@ -135,14 +138,14 @@ public final class CrudGenerationService {
                     }
 
                     @PutMapping("/{id}")
-                    ResponseEntity<%s> update(@PathVariable Long id, @RequestBody @Valid Update%sRequest request) {
+                    ResponseEntity<%s> update(@PathVariable %s id, @RequestBody @Valid Update%sRequest request) {
                         return service.update(id, %s)
                                 .map(ResponseEntity::ok)
                                 .orElse(ResponseEntity.notFound().build());
                     }
 
                     @DeleteMapping("/{id}")
-                    ResponseEntity<Void> delete(@PathVariable Long id) {
+                    ResponseEntity<Void> delete(@PathVariable %s id) {
                         service.deleteById(id);
                         return ResponseEntity.noContent().build();
                     }
@@ -154,9 +157,10 @@ public final class CrudGenerationService {
                 serviceName,
                 controllerName, serviceName,
                 dtoName,
-                dtoName,
+                dtoName, idType,
                 dtoName, entityName, createCmdCall,
-                dtoName, entityName, updateCmdCall);
+                dtoName, idType, entityName, updateCmdCall,
+                idType);
 
         createJavaFile(project, dir, controllerName, text);
     }
@@ -178,6 +182,9 @@ public final class CrudGenerationService {
 
         String dtoFqn = entityPackage(entityClass) + "." + dtoName;
         String repositoryFqn = config.repositoryPackage() + "." + repositoryName;
+        String idType = Optional.ofNullable(findIdField(entityClass))
+                .map(f -> f.getType().getPresentableText())
+                .orElse("Long");
 
         String text = """
                 package %s;
@@ -206,7 +213,7 @@ public final class CrudGenerationService {
                     }
 
                     @Transactional(readOnly = true)
-                    public Optional<%s> findById(Long id) {
+                    public Optional<%s> findById(%s id) {
                         return repository.findById(id).map(this::toDto);
                     }
 
@@ -217,14 +224,14 @@ public final class CrudGenerationService {
                     }
 
                     @Transactional
-                    public Optional<%s> update(Long id, Update%sCmd cmd) {
+                    public Optional<%s> update(%s id, Update%sCmd cmd) {
                         return repository.findById(id).map(entity -> {
                 %s            return toDto(repository.save(entity));
                         });
                     }
 
                     @Transactional
-                    public void deleteById(Long id) {
+                    public void deleteById(%s id) {
                         repository.deleteById(id);
                     }
 
@@ -239,12 +246,13 @@ public final class CrudGenerationService {
                 repositoryName,
                 serviceName, repositoryName,
                 dtoName,
-                dtoName,
+                dtoName, idType,
                 dtoName, entityName,
                 entityName, entityName,
                 createEntityMapping,
-                dtoName, entityName,
+                dtoName, idType, entityName,
                 updateEntityMapping,
+                idType,
                 dtoName, entityName,
                 toDtoCall);
 
