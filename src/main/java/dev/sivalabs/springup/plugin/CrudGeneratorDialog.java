@@ -3,6 +3,7 @@ package dev.sivalabs.springup.plugin;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.psi.PsiClass;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -51,10 +52,24 @@ public class CrudGeneratorDialog extends DialogWrapper {
         controllerFqnField = new JTextField(controllerPkg + "." + entityName + "Controller");
         serviceFqnField = new JTextField(servicePkg + "." + entityName + "Service");
         repositoryFqnField = new JTextField(repositoryPkg + "." + entityName + "Repository");
-        panel = new JPanel(new GridLayout(0, 2, 8, 8));
-        panel.add(new JLabel("Controller")); panel.add(controllerFqnField);
-        panel.add(new JLabel("Service")); panel.add(serviceFqnField);
-        panel.add(new JLabel("Repository")); panel.add(repositoryFqnField);
+
+        panel = new JPanel(new GridBagLayout());
+        GridBagConstraints labelGbc = new GridBagConstraints();
+        labelGbc.anchor = GridBagConstraints.WEST;
+        labelGbc.insets = JBUI.insets(4, 0, 4, 8);
+
+        GridBagConstraints fieldGbc = new GridBagConstraints();
+        fieldGbc.fill = GridBagConstraints.HORIZONTAL;
+        fieldGbc.weightx = 1.0;
+        fieldGbc.gridwidth = GridBagConstraints.REMAINDER;
+        fieldGbc.insets = JBUI.insets(4, 0);
+
+        panel.add(new JLabel("Controller"), labelGbc);
+        panel.add(controllerFqnField, fieldGbc);
+        panel.add(new JLabel("Service"), labelGbc);
+        panel.add(serviceFqnField, fieldGbc);
+        panel.add(new JLabel("Repository"), labelGbc);
+        panel.add(repositoryFqnField, fieldGbc);
     }
 
     @Override
