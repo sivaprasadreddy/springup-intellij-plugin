@@ -3,7 +3,6 @@ package dev.sivalabs.springup.plugin;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
@@ -11,68 +10,69 @@ import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 public final class CrudGenerationService {
 
-    public static void generate(Project project, PsiClass entityClass,
-                                CrudGenerationConfig config) {
+    public static void generate(Project project, PsiClass entityClass, CrudGenerationConfig config) {
         WriteCommandAction.runWriteCommandAction(project, () -> {
+            createEntityDto(project, entityClass);
+            createCreateCmd(project, entityClass, config);
+            createUpdateCmd(project, entityClass, config);
+            createCreateRequest(project, entityClass, config);
+            createUpdateRequest(project, entityClass, config);
             createRepository(project, entityClass, config);
             createService(project, entityClass, config);
             createController(project, entityClass, config);
-
-            if (config.generateRequestDto()) {
-                createRequestDto(project, entityClass, config);
-            }
-            if (config.generateResponseDto()) {
-                createResponseDto(project, entityClass, config);
-            }
         });
     }
 
-    private static void createResponseDto(Project project, PsiClass entityClass, CrudGenerationConfig config) {
-        String packageName = config.servicePackage() + ".dto";
-        PsiDirectory dir = getOrCreatePackageDir(project, packageName);
+    // EntityNameDto — same package as Entity, includes all fields (with ID)
+    private static void createEntityDto(Project project, PsiClass entityClass) {
+        String pkg = entityPackage(entityClass);
+        PsiDirectory dir = getOrCreatePackageDir(project, pkg);
+        String className = entityClass.getName() + "Dto";
+        List<PsiField> fields = getRelevantFields(entityClass, true);
 
-        String entityName = entityClass.getName();
-        String className = entityName + "ResponseDto";
-
-        String fields = buildDtoFields(entityClass, true);
-
-        String text = """
-        package %s;
-
-        public class %s {
-
-        %s
-
-        }
-        """.formatted(packageName, className, fields);
-
-        createJavaFile(project, dir, className, text);
+        createJavaFile(project, dir, className, buildRecord(pkg, className, fields));
     }
 
-    private static void createRequestDto(Project project, PsiClass entityClass, CrudGenerationConfig config) {
-        String packageName = config.servicePackage() + ".dto";
-        PsiDirectory dir = getOrCreatePackageDir(project, packageName);
+    // CreateEntityNameCmd — service package, non-ID fields
+    private static void createCreateCmd(Project project, PsiClass entityClass, CrudGenerationConfig config) {
+        String className = "Create" + entityClass.getName() + "Cmd";
+        PsiDirectory dir = getOrCreatePackageDir(project, config.servicePackage());
+        List<PsiField> fields = getRelevantFields(entityClass, false);
 
-        String entityName = entityClass.getName();
-        String className = entityName + "RequestDto";
+        createJavaFile(project, dir, className, buildRecord(config.servicePackage(), className, fields));
+    }
 
-        String fields = buildDtoFields(entityClass, false);
+    // UpdateEntityNameCmd — service package, non-ID fields
+    private static void createUpdateCmd(Project project, PsiClass entityClass, CrudGenerationConfig config) {
+        String className = "Update" + entityClass.getName() + "Cmd";
+        PsiDirectory dir = getOrCreatePackageDir(project, config.servicePackage());
+        List<PsiField> fields = getRelevantFields(entityClass, false);
 
-        String text = """
-        package %s;
+        createJavaFile(project, dir, className, buildRecord(config.servicePackage(), className, fields));
+    }
 
-        public class %s {
+    // CreateEntityNameRequest — controller (web) package, non-ID fields
+    private static void createCreateRequest(Project project, PsiClass entityClass, CrudGenerationConfig config) {
+        String className = "Create" + entityClass.getName() + "Request";
+        PsiDirectory dir = getOrCreatePackageDir(project, config.controllerPackage());
+        List<PsiField> fields = getRelevantFields(entityClass, false);
 
-        %s
+        createJavaFile(project, dir, className, buildRecord(config.controllerPackage(), className, fields));
+    }
 
-        }
-        """.formatted(packageName, className, fields);
+    // UpdateEntityNameRequest — controller (web) package, non-ID fields
+    private static void createUpdateRequest(Project project, PsiClass entityClass, CrudGenerationConfig config) {
+        String className = "Update" + entityClass.getName() + "Request";
+        PsiDirectory dir = getOrCreatePackageDir(project, config.controllerPackage());
+        List<PsiField> fields = getRelevantFields(entityClass, false);
 
-        createJavaFile(project, dir, className, text);
+        createJavaFile(project, dir, className, buildRecord(config.controllerPackage(), className, fields));
     }
 
     private static void createController(Project project, PsiClass entityClass, CrudGenerationConfig config) {
@@ -81,78 +81,60 @@ public final class CrudGenerationService {
         String entityName = entityClass.getName();
         String serviceName = config.serviceName();
         String controllerName = config.controllerName();
-
         String basePath = entityName.toLowerCase() + "s";
+        String dtoName = entityName + "Dto";
 
-        String text = """
-        package %s;
+        List<PsiField> nonIdFields = getRelevantFields(entityClass, false);
+        String createCmdCall = recordConstructorCall("Create" + entityName + "Cmd", nonIdFields, "request", false);
+        String updateCmdCall = recordConstructorCall("Update" + entityName + "Cmd", nonIdFields, "request", false);
 
-        import %s;
-        import %s;
-        import org.springframework.http.ResponseEntity;
-        import org.springframework.web.bind.annotation.*;
+        String dtoFqn = entityPackage(entityClass) + "." + dtoName;
+        String serviceFqn = config.servicePackage() + "." + serviceName;
+        String createCmdFqn = config.servicePackage() + ".Create" + entityName + "Cmd";
+        String updateCmdFqn = config.servicePackage() + ".Update" + entityName + "Cmd";
 
-        import java.util.List;
-
-        @RestController
-        @RequestMapping("/%s")
-        public class %s {
-
-            private final %s service;
-
-            public %s(%s service) {
-                this.service = service;
-            }
-
-            @GetMapping
-            public List<%s> getAll() {
-                return service.findAll();
-            }
-
-            @GetMapping("/{id}")
-            public ResponseEntity<%s> getById(@PathVariable Long id) {
-                return service.findById(id)
-                        .map(ResponseEntity::ok)
-                        .orElse(ResponseEntity.notFound().build());
-            }
-
-            @PostMapping
-            public %s create(@RequestBody %s entity) {
-                return service.save(entity);
-            }
-
-            @PutMapping("/{id}")
-            public ResponseEntity<%s> update(@PathVariable Long id, @RequestBody %s entity) {
-                return service.findById(id)
-                        .map(existing -> {
-                            entity.setId(id);
-                            return ResponseEntity.ok(service.save(entity));
-                        })
-                        .orElse(ResponseEntity.notFound().build());
-            }
-
-            @DeleteMapping("/{id}")
-            public ResponseEntity<Void> delete(@PathVariable Long id) {
-                service.deleteById(id);
-                return ResponseEntity.noContent().build();
-            }
-        }
-        """.formatted(
-                config.controllerPackage(),
-                entityClass.getQualifiedName(),
-                config.servicePackage() + "." + serviceName,
-                basePath,
-                controllerName,
-                serviceName,
-                controllerName,
-                serviceName,
-                entityName,
-                entityName,
-                entityName,
-                entityName,
-                entityName,
-                entityName
-        );
+        String text = "package " + config.controllerPackage() + ";\n\n"
+                + "import " + dtoFqn + ";\n"
+                + "import " + serviceFqn + ";\n"
+                + "import " + createCmdFqn + ";\n"
+                + "import " + updateCmdFqn + ";\n"
+                + "import org.springframework.http.ResponseEntity;\n"
+                + "import org.springframework.web.bind.annotation.*;\n\n"
+                + "import java.util.List;\n\n"
+                + "@RestController\n"
+                + "@RequestMapping(\"/" + basePath + "\")\n"
+                + "public class " + controllerName + " {\n\n"
+                + "    private final " + serviceName + " service;\n\n"
+                + "    public " + controllerName + "(" + serviceName + " service) {\n"
+                + "        this.service = service;\n"
+                + "    }\n\n"
+                + "    @GetMapping\n"
+                + "    public List<" + dtoName + "> getAll() {\n"
+                + "        return service.findAll();\n"
+                + "    }\n\n"
+                + "    @GetMapping(\"/{id}\")\n"
+                + "    public ResponseEntity<" + dtoName + "> getById(@PathVariable Long id) {\n"
+                + "        return service.findById(id)\n"
+                + "                .map(ResponseEntity::ok)\n"
+                + "                .orElse(ResponseEntity.notFound().build());\n"
+                + "    }\n\n"
+                + "    @PostMapping\n"
+                + "    public " + dtoName + " create(@RequestBody Create" + entityName + "Request request) {\n"
+                + "        return service.create(" + createCmdCall + ");\n"
+                + "    }\n\n"
+                + "    @PutMapping(\"/{id}\")\n"
+                + "    public ResponseEntity<" + dtoName + "> update(@PathVariable Long id,"
+                + " @RequestBody Update" + entityName + "Request request) {\n"
+                + "        return service.update(id, " + updateCmdCall + ")\n"
+                + "                .map(ResponseEntity::ok)\n"
+                + "                .orElse(ResponseEntity.notFound().build());\n"
+                + "    }\n\n"
+                + "    @DeleteMapping(\"/{id}\")\n"
+                + "    public ResponseEntity<Void> delete(@PathVariable Long id) {\n"
+                + "        service.deleteById(id);\n"
+                + "        return ResponseEntity.noContent().build();\n"
+                + "    }\n"
+                + "}\n";
 
         createJavaFile(project, dir, controllerName, text);
     }
@@ -161,57 +143,57 @@ public final class CrudGenerationService {
         PsiDirectory dir = getOrCreatePackageDir(project, config.servicePackage());
 
         String entityName = entityClass.getName();
-        String repositoryName = config.repositoryName();
         String serviceName = config.serviceName();
+        String repositoryName = config.repositoryName();
+        String dtoName = entityName + "Dto";
 
-        String text = """
-        package %s;
+        List<PsiField> allFields = getRelevantFields(entityClass, true);
+        List<PsiField> nonIdFields = getRelevantFields(entityClass, false);
 
-        import %s;
-        import %s;
-        import org.springframework.stereotype.Service;
+        String createEntityMapping = entityFromRecordMapping(nonIdFields, "entity", "cmd", "        ");
+        String updateEntityMapping = entityFromRecordMapping(nonIdFields, "entity", "cmd", "            ");
+        String toDtoCall = recordConstructorCall(dtoName, allFields, "entity", true);
 
-        import java.util.List;
-        import java.util.Optional;
+        String dtoFqn = entityPackage(entityClass) + "." + dtoName;
+        String repositoryFqn = config.repositoryPackage() + "." + repositoryName;
 
-        @Service
-        public class %s {
-
-            private final %s repository;
-
-            public %s(%s repository) {
-                this.repository = repository;
-            }
-
-            public List<%s> findAll() {
-                return repository.findAll();
-            }
-
-            public Optional<%s> findById(Long id) {
-                return repository.findById(id);
-            }
-
-            public %s save(%s entity) {
-                return repository.save(entity);
-            }
-
-            public void deleteById(Long id) {
-                repository.deleteById(id);
-            }
-        }
-        """.formatted(
-                config.servicePackage(),
-                entityClass.getQualifiedName(),
-                config.repositoryPackage() + "." + repositoryName,
-                serviceName,
-                repositoryName,
-                serviceName,
-                repositoryName,
-                entityName,
-                entityName,
-                entityName,
-                entityName
-        );
+        String text = "package " + config.servicePackage() + ";\n\n"
+                + "import " + entityClass.getQualifiedName() + ";\n"
+                + "import " + dtoFqn + ";\n"
+                + "import " + repositoryFqn + ";\n"
+                + "import org.springframework.stereotype.Service;\n\n"
+                + "import java.util.List;\n"
+                + "import java.util.Optional;\n\n"
+                + "@Service\n"
+                + "public class " + serviceName + " {\n\n"
+                + "    private final " + repositoryName + " repository;\n\n"
+                + "    public " + serviceName + "(" + repositoryName + " repository) {\n"
+                + "        this.repository = repository;\n"
+                + "    }\n\n"
+                + "    public List<" + dtoName + "> findAll() {\n"
+                + "        return repository.findAll().stream().map(this::toDto).toList();\n"
+                + "    }\n\n"
+                + "    public Optional<" + dtoName + "> findById(Long id) {\n"
+                + "        return repository.findById(id).map(this::toDto);\n"
+                + "    }\n\n"
+                + "    public " + dtoName + " create(Create" + entityName + "Cmd cmd) {\n"
+                + "        " + entityName + " entity = new " + entityName + "();\n"
+                + createEntityMapping
+                + "        return toDto(repository.save(entity));\n"
+                + "    }\n\n"
+                + "    public Optional<" + dtoName + "> update(Long id, Update" + entityName + "Cmd cmd) {\n"
+                + "        return repository.findById(id).map(entity -> {\n"
+                + updateEntityMapping
+                + "            return toDto(repository.save(entity));\n"
+                + "        });\n"
+                + "    }\n\n"
+                + "    public void deleteById(Long id) {\n"
+                + "        repository.deleteById(id);\n"
+                + "    }\n\n"
+                + "    private " + dtoName + " toDto(" + entityName + " entity) {\n"
+                + "        return " + toDtoCall + ";\n"
+                + "    }\n"
+                + "}\n";
 
         createJavaFile(project, dir, serviceName, text);
     }
@@ -223,79 +205,100 @@ public final class CrudGenerationService {
                 .map(f -> f.getType().getPresentableText())
                 .orElse("Long");
 
-        String text = """
-        package %s;
-
-        import %s;
-        import org.springframework.data.jpa.repository.JpaRepository;
-
-        public interface %s extends JpaRepository<%s, %s> {
-        }
-        """.formatted(
-                config.repositoryPackage(),
-                entityClass.getQualifiedName(),
-                config.repositoryName(),
-                entityName,
-                idType
-        );
+        String text = "package " + config.repositoryPackage() + ";\n\n"
+                + "import " + entityClass.getQualifiedName() + ";\n"
+                + "import org.springframework.data.jpa.repository.JpaRepository;\n\n"
+                + "public interface " + config.repositoryName()
+                + " extends JpaRepository<" + entityName + ", " + idType + "> {\n"
+                + "}\n";
 
         createJavaFile(project, dir, config.repositoryName(), text);
     }
 
-    private static String buildDtoFields(PsiClass entityClass, boolean includeId) {
-        StringBuilder sb = new StringBuilder();
+    // --- helpers ---
 
+    private static List<PsiField> getRelevantFields(PsiClass entityClass, boolean includeId) {
+        List<PsiField> result = new ArrayList<>();
         for (PsiField field : entityClass.getAllFields()) {
-
             if (field.hasModifierProperty(PsiModifier.STATIC)) continue;
 
             PsiModifierList list = field.getModifierList();
             if (list != null && (
                     list.findAnnotation("jakarta.persistence.OneToMany") != null ||
-                            list.findAnnotation("jakarta.persistence.ManyToMany") != null ||
-                            list.findAnnotation("javax.persistence.OneToMany") != null ||
-                            list.findAnnotation("javax.persistence.ManyToMany") != null
+                    list.findAnnotation("jakarta.persistence.ManyToMany") != null ||
+                    list.findAnnotation("javax.persistence.OneToMany") != null ||
+                    list.findAnnotation("javax.persistence.ManyToMany") != null
             )) continue;
 
             boolean isId = list != null && (
                     list.findAnnotation("jakarta.persistence.Id") != null ||
-                            list.findAnnotation("javax.persistence.Id") != null
+                    list.findAnnotation("javax.persistence.Id") != null
             );
-
             if (!includeId && isId) continue;
 
-            sb.append("    private ")
-                    .append(field.getType().getPresentableText())
-                    .append(" ")
-                    .append(field.getName())
-                    .append(";\n\n");
+            result.add(field);
         }
+        return result;
+    }
 
+    /** Generates a {@code public record Foo(Type field, ...) {}} source string. */
+    private static String buildRecord(String pkg, String className, List<PsiField> fields) {
+        StringBuilder components = new StringBuilder();
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) components.append(", ");
+            PsiField f = fields.get(i);
+            // Use canonical (fully qualified) type name so that shortenClassReferences
+            // can resolve each type and add the required imports automatically.
+            components.append(f.getType().getCanonicalText()).append(" ").append(f.getName());
+        }
+        return "package " + pkg + ";\n\n"
+                + "public record " + className + "(" + components + ") {}\n";
+    }
+
+    /**
+     * Builds entity-setter lines from a record source:
+     * {@code entity.setFoo(cmd.foo());} — entity uses JavaBean setters, record uses plain accessors.
+     */
+    private static String entityFromRecordMapping(List<PsiField> fields,
+                                                   String entityVar, String recordVar,
+                                                   String indent) {
+        StringBuilder sb = new StringBuilder();
+        for (PsiField field : fields) {
+            String name = field.getName();
+            String cap = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+            sb.append(indent).append(entityVar).append(".set").append(cap)
+              .append("(").append(recordVar).append(".").append(name).append("());\n");
+        }
         return sb.toString();
     }
 
-    /*private static List<PsiField> dtoFields(PsiClass entityClass) {
-        return Arrays.stream(entityClass.getAllFields())
-                .filter(f -> !f.hasModifierProperty(PsiModifier.STATIC))
-                .filter(f -> !hasAnyAnnotation(f,
-                        "jakarta.persistence.OneToMany",
-                        "jakarta.persistence.ManyToMany",
-                        "javax.persistence.OneToMany",
-                        "javax.persistence.ManyToMany"))
-                .toList();
-    }
-
-    private static boolean hasAnyAnnotation(PsiField field, String... annotationFQNs) {
-        PsiModifierList modifierList = field.getModifierList();
-        if (modifierList == null) return false;
-
-        for (String fqn : annotationFQNs) {
-            if (modifierList.findAnnotation(fqn) != null) {
-                return true;
+    /**
+     * Builds a record constructor call expression.
+     * {@code useGetters=true}  → {@code new Foo(source.getBar(), ...)}  (entity → record)
+     * {@code useGetters=false} → {@code new Foo(source.bar(), ...)}     (record → record)
+     */
+    private static String recordConstructorCall(String recordClass, List<PsiField> fields,
+                                                 String sourceVar, boolean useGetters) {
+        StringBuilder sb = new StringBuilder("new ").append(recordClass).append("(");
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) sb.append(", ");
+            String name = fields.get(i).getName();
+            if (useGetters) {
+                String cap = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+                sb.append(sourceVar).append(".get").append(cap).append("()");
+            } else {
+                sb.append(sourceVar).append(".").append(name).append("()");
             }
         }
-        return false;
-    }*/
+        sb.append(")");
+        return sb.toString();
+    }
+
+    private static String entityPackage(PsiClass entityClass) {
+        String fqn = entityClass.getQualifiedName();
+        int dot = fqn != null ? fqn.lastIndexOf('.') : -1;
+        return dot >= 0 ? fqn.substring(0, dot) : "";
+    }
 
     private static void createJavaFile(Project project, PsiDirectory dir, String className, String content) {
         PsiFileFactory factory = PsiFileFactory.getInstance(project);
@@ -315,7 +318,7 @@ public final class CrudGenerationService {
             PsiModifierList list = field.getModifierList();
             if (list != null && (
                     list.findAnnotation("jakarta.persistence.Id") != null ||
-                            list.findAnnotation("javax.persistence.Id") != null)) {
+                    list.findAnnotation("javax.persistence.Id") != null)) {
                 return field;
             }
         }
@@ -329,8 +332,6 @@ public final class CrudGenerationService {
             if (dirs.length > 0) return dirs[0];
         }
 
-        // fallback: create under a source root
-        ProjectFileIndex index = ProjectRootManager.getInstance(project).getFileIndex();
         VirtualFile[] roots = ProjectRootManager.getInstance(project).getContentSourceRoots();
         if (roots.length == 0) throw new IllegalStateException("No source roots found");
 

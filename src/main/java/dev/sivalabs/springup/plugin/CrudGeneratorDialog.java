@@ -13,14 +13,9 @@ public class CrudGeneratorDialog extends DialogWrapper {
     private final PsiClass entityClass;
 
     private JPanel panel;
-    private JTextField controllerNameField;
-    private JTextField serviceNameField;
-    private JTextField repositoryNameField;
-    private JTextField controllerPackageField;
-    private JTextField servicePackageField;
-    private JTextField repositoryPackageField;
-    private JCheckBox generateRequestDtoCheckBox;
-    private JCheckBox generateResponseDtoCheckBox;
+    private JTextField controllerFqnField;
+    private JTextField serviceFqnField;
+    private JTextField repositoryFqnField;
 
     public CrudGeneratorDialog(Project project, PsiClass entityClass) {
         super(project);
@@ -34,23 +29,32 @@ public class CrudGeneratorDialog extends DialogWrapper {
 
     private void initUiDefaults() {
         String entityName = entityClass.getName();
-        controllerNameField = new JTextField(entityName + "Controller");
-        serviceNameField = new JTextField(entityName + "Service");
-        repositoryNameField = new JTextField(entityName + "Repository");
-        controllerPackageField = new JTextField("com.example.controller");
-        servicePackageField = new JTextField("com.example.service");
-        repositoryPackageField = new JTextField("com.example.repository");
-        generateRequestDtoCheckBox = new JCheckBox("Generate Request DTO", true);
-        generateResponseDtoCheckBox = new JCheckBox("Generate Response DTO", true);
+        String entityPackage = entityClass.getQualifiedName() != null
+                ? entityClass.getQualifiedName().substring(0, entityClass.getQualifiedName().lastIndexOf('.'))
+                : "com.example";
 
+        String controllerPkg;
+        String servicePkg;
+        String repositoryPkg;
+
+        if (entityPackage.endsWith(".domain")) {
+            String basePackage = entityPackage.substring(0, entityPackage.lastIndexOf('.'));
+            controllerPkg = basePackage + ".web";
+            servicePkg = entityPackage;
+            repositoryPkg = entityPackage;
+        } else {
+            controllerPkg = entityPackage + ".controller";
+            servicePkg = entityPackage + ".service";
+            repositoryPkg = entityPackage + ".repository";
+        }
+
+        controllerFqnField = new JTextField(controllerPkg + "." + entityName + "Controller");
+        serviceFqnField = new JTextField(servicePkg + "." + entityName + "Service");
+        repositoryFqnField = new JTextField(repositoryPkg + "." + entityName + "Repository");
         panel = new JPanel(new GridLayout(0, 2, 8, 8));
-        panel.add(new JLabel("Controller Name")); panel.add(controllerNameField);
-        panel.add(new JLabel("Controller Package")); panel.add(controllerPackageField);
-        panel.add(new JLabel("Service Name")); panel.add(serviceNameField);
-        panel.add(new JLabel("Service Package")); panel.add(servicePackageField);
-        panel.add(new JLabel("Repository Name")); panel.add(repositoryNameField);
-        panel.add(new JLabel("Repository Package")); panel.add(repositoryPackageField);
-        panel.add(generateRequestDtoCheckBox); panel.add(generateResponseDtoCheckBox);
+        panel.add(new JLabel("Controller")); panel.add(controllerFqnField);
+        panel.add(new JLabel("Service")); panel.add(serviceFqnField);
+        panel.add(new JLabel("Repository")); panel.add(repositoryFqnField);
     }
 
     @Override
@@ -60,14 +64,22 @@ public class CrudGeneratorDialog extends DialogWrapper {
 
     public CrudGenerationConfig getConfig() {
         return new CrudGenerationConfig(
-            controllerNameField.getText().trim(),
-            serviceNameField.getText().trim(),
-            repositoryNameField.getText().trim(),
-            controllerPackageField.getText().trim(),
-            servicePackageField.getText().trim(),
-            repositoryPackageField.getText().trim(),
-            generateRequestDtoCheckBox.isSelected(),
-            generateResponseDtoCheckBox.isSelected()
+            simpleName(controllerFqnField.getText().trim()),
+            simpleName(serviceFqnField.getText().trim()),
+            simpleName(repositoryFqnField.getText().trim()),
+            packageName(controllerFqnField.getText().trim()),
+            packageName(serviceFqnField.getText().trim()),
+            packageName(repositoryFqnField.getText().trim())
         );
+    }
+
+    private static String simpleName(String fqn) {
+        int dot = fqn.lastIndexOf('.');
+        return dot >= 0 ? fqn.substring(dot + 1) : fqn;
+    }
+
+    private static String packageName(String fqn) {
+        int dot = fqn.lastIndexOf('.');
+        return dot >= 0 ? fqn.substring(0, dot) : "";
     }
 }
