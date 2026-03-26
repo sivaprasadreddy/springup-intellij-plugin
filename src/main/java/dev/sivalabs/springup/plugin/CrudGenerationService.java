@@ -27,6 +27,7 @@ public final class CrudGenerationService {
             createRepository(project, entityClass, config);
             createService(project, entityClass, config);
             createController(project, entityClass, config);
+            createControllerTest(project, entityClass, config);
         });
     }
 
@@ -105,13 +106,14 @@ public final class CrudGenerationService {
                 import %s;
                 import %s;
                 import jakarta.validation.Valid;
+                import org.springframework.http.HttpStatus;
                 import org.springframework.http.ResponseEntity;
                 import org.springframework.web.bind.annotation.*;
 
                 import java.util.List;
 
                 @RestController
-                @RequestMapping("/%s")
+                @RequestMapping("/api/%s")
                 class %s {
 
                     private final %s service;
@@ -133,6 +135,7 @@ public final class CrudGenerationService {
                     }
 
                     @PostMapping
+                    @ResponseStatus(HttpStatus.CREATED)
                     %s create(@RequestBody @Valid Create%sRequest request) {
                         return service.create(%s);
                     }
@@ -259,6 +262,110 @@ public final class CrudGenerationService {
         createJavaFile(project, dir, serviceName, text);
     }
 
+    private static void createControllerTest(Project project, PsiClass entityClass, CrudGenerationConfig config) {
+        PsiDirectory dir = getOrCreateTestPackageDir(project, config.controllerPackage());
+
+        String entityName = entityClass.getName();
+        String basePath = entityName.toLowerCase(Locale.getDefault()) + "s";
+        String testClassName = entityName + "ControllerTests";
+
+        String text = """
+                package %s;
+
+                import org.junit.jupiter.api.Test;
+                import org.springframework.beans.factory.annotation.Autowired;
+                import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
+                import org.springframework.boot.test.context.SpringBootTest;
+                import org.springframework.test.context.ActiveProfiles;
+                import org.springframework.test.web.servlet.client.RestTestClient;
+
+                import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
+
+                @SpringBootTest(webEnvironment = RANDOM_PORT)
+                //@Import(TestcontainersConfiguration.class)
+                @AutoConfigureRestTestClient
+                @ActiveProfiles("test")
+                class %sControllerTests {
+
+                    @Autowired
+                    RestTestClient restTestClient;
+
+                    @Test
+                    void shouldReturnAll%ss() {
+                        restTestClient.get()
+                                .uri("/api/%s")
+                                .exchange()
+                                .expectStatus().isOk();
+                    }
+
+                    @Test
+                    void shouldCreate%s() {
+                        Create%sRequest request = new Create%sRequest();
+                        restTestClient.post()
+                                .uri("/api/%s")
+                                .body(request)
+                                .exchange()
+                                .expectStatus().isCreated();
+                    }
+
+                    @Test
+                    void shouldGet%sById() {
+                        var id = "";
+
+                        restTestClient.get()
+                                .uri("/api/%s/{id}", id)
+                                .exchange()
+                                .expectStatus().isOk();
+                    }
+
+                    @Test
+                    void shouldReturn404When%sDoesNotExist() {
+                        restTestClient.get()
+                                .uri("/api/%s/{id}", "999999")
+                                .exchange()
+                                .expectStatus().isNotFound();
+                    }
+
+                    @Test
+                    void shouldUpdate%s() {
+                        var id = "";
+                        Update%sRequest request = new Update%sRequest();
+                        restTestClient.put()
+                                .uri("/api/%s/{id}", id)
+                                .body(request)
+                                .exchange()
+                                .expectStatus().isOk();
+                    }
+
+                    @Test
+                    void shouldDelete%s() {
+                        var id = "";
+
+                        restTestClient.delete()
+                                .uri("/api/%s/{id}", id)
+                                .exchange()
+                                .expectStatus().isNoContent();
+
+                        restTestClient.get()
+                                .uri("/api/%s/{id}", id)
+                                .exchange()
+                                .expectStatus().isNotFound();
+                    }
+                }
+                """.formatted(
+                config.controllerPackage(),
+                entityName,
+                entityName, basePath,
+                entityName, entityName, entityName, basePath,
+                entityName, basePath,
+                entityName, basePath,
+                entityName, entityName, entityName, basePath,
+                entityName,
+                basePath, basePath);
+
+        createJavaFile(project, dir, testClassName, text);
+    }
+
     private static void createRepository(Project project, PsiClass entityClass, CrudGenerationConfig config) {
         PsiDirectory dir = getOrCreatePackageDir(project, config.repositoryPackage());
         String entityName = entityClass.getName();
@@ -380,7 +487,11 @@ public final class CrudGenerationService {
         );
 
         PsiElement added = dir.add(javaFile);
-        JavaCodeStyleManager.getInstance(project).shortenClassReferences(added);
+        JavaCodeStyleManager styleManager = JavaCodeStyleManager.getInstance(project);
+        styleManager.shortenClassReferences(added);
+        if (added instanceof PsiFile file) {
+            styleManager.optimizeImports(file);
+        }
         CodeStyleManager.getInstance(project).reformat(added);
     }
 
@@ -399,15 +510,47 @@ public final class CrudGenerationService {
     private static PsiDirectory getOrCreatePackageDir(Project project, String packageName) {
         PsiPackage psiPackage = JavaPsiFacade.getInstance(project).findPackage(packageName);
         if (psiPackage != null) {
-            PsiDirectory[] dirs = psiPackage.getDirectories();
-            if (dirs.length > 0) return dirs[0];
+            for (PsiDirectory dir : psiPackage.getDirectories()) {
+                if (!dir.getVirtualFile().getPath().contains("/test/")) {
+                    return dir;
+                }
+            }
         }
 
         VirtualFile[] roots = ProjectRootManager.getInstance(project).getContentSourceRoots();
-        if (roots.length == 0) throw new IllegalStateException("No source roots found");
+        VirtualFile mainRoot = null;
+        for (VirtualFile root : roots) {
+            if (!root.getPath().contains("/test/")) {
+                mainRoot = root;
+                break;
+            }
+        }
+        if (mainRoot == null) throw new IllegalStateException("No main source root found");
 
-        PsiDirectory dir = PsiManager.getInstance(project).findDirectory(roots[0]);
+        PsiDirectory dir = PsiManager.getInstance(project).findDirectory(mainRoot);
         if (dir == null) throw new IllegalStateException("Cannot resolve source root");
+
+        for (String part : packageName.split("\\.")) {
+            PsiDirectory next = dir.findSubdirectory(part);
+            if (next == null) next = dir.createSubdirectory(part);
+            dir = next;
+        }
+        return dir;
+    }
+
+    private static PsiDirectory getOrCreateTestPackageDir(Project project, String packageName) {
+        VirtualFile[] roots = ProjectRootManager.getInstance(project).getContentSourceRoots();
+        VirtualFile testRoot = null;
+        for (VirtualFile root : roots) {
+            if (root.getPath().contains("/test/")) {
+                testRoot = root;
+                break;
+            }
+        }
+        if (testRoot == null) throw new IllegalStateException("No test source root found");
+
+        PsiDirectory dir = PsiManager.getInstance(project).findDirectory(testRoot);
+        if (dir == null) throw new IllegalStateException("Cannot resolve test source root");
 
         for (String part : packageName.split("\\.")) {
             PsiDirectory next = dir.findSubdirectory(part);
