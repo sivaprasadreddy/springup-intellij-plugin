@@ -1,5 +1,6 @@
 package dev.sivalabs.springup.plugin;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiClass;
@@ -9,6 +10,10 @@ import com.intellij.psi.util.PsiTreeUtil;
 import org.jetbrains.annotations.NotNull;
 
 public class GenerateCrudAction extends AnAction {
+
+    public GenerateCrudAction() {
+        getTemplatePresentation().setIcon(AllIcons.Nodes.Controller);
+    }
 
     @Override
     public @NotNull ActionUpdateThread getActionUpdateThread() {

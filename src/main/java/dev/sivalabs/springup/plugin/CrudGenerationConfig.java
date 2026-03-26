@@ -1,36 +1,10 @@
 package dev.sivalabs.springup.plugin;
 
-public class CrudGenerationConfig {
-
-    private final String controllerName;
-    private final String serviceName;
-    private final String repositoryName;
-
-    private final String controllerPackage;
-    private final String servicePackage;
-    private final String repositoryPackage;
-
-    public CrudGenerationConfig(
-            String controllerName,
-            String serviceName,
-            String repositoryName,
-            String controllerPackage,
-            String servicePackage,
-            String repositoryPackage
-    ) {
-        this.controllerName = controllerName;
-        this.serviceName = serviceName;
-        this.repositoryName = repositoryName;
-        this.controllerPackage = controllerPackage;
-        this.servicePackage = servicePackage;
-        this.repositoryPackage = repositoryPackage;
-    }
-
-    public String controllerName() { return controllerName; }
-    public String serviceName() { return serviceName; }
-    public String repositoryName() { return repositoryName; }
-
-    public String controllerPackage() { return controllerPackage; }
-    public String servicePackage() { return servicePackage; }
-    public String repositoryPackage() { return repositoryPackage; }
+public record CrudGenerationConfig(
+        String controllerName,
+        String serviceName,
+        String repositoryName,
+        String controllerPackage,
+        String servicePackage,
+        String repositoryPackage) {
 }
