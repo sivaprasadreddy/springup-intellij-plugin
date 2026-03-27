@@ -269,6 +269,10 @@ public final class CrudGenerationService {
         String basePath = entityName.toLowerCase(Locale.getDefault()) + "s";
         String testClassName = entityName + "ControllerTests";
 
+        List<PsiField> nonIdFields = getRelevantFields(entityClass, false);
+        String createRequestCall = defaultConstructorCall("Create" + entityName + "Request", nonIdFields);
+        String updateRequestCall = defaultConstructorCall("Update" + entityName + "Request", nonIdFields);
+
         String text = """
                 package %s;
 
@@ -300,7 +304,7 @@ public final class CrudGenerationService {
 
                     @Test
                     void shouldCreate%s() {
-                        Create%sRequest request = new Create%sRequest();
+                        var request = %s;
                         restTestClient.post()
                                 .uri("/api/%s")
                                 .body(request)
@@ -329,7 +333,7 @@ public final class CrudGenerationService {
                     @Test
                     void shouldUpdate%s() {
                         var id = "";
-                        Update%sRequest request = new Update%sRequest();
+                        var request = %s;
                         restTestClient.put()
                                 .uri("/api/%s/{id}", id)
                                 .body(request)
@@ -356,10 +360,10 @@ public final class CrudGenerationService {
                 config.controllerPackage(),
                 entityName,
                 entityName, basePath,
-                entityName, entityName, entityName, basePath,
+                entityName, createRequestCall, basePath,
                 entityName, basePath,
                 entityName, basePath,
-                entityName, entityName, entityName, basePath,
+                entityName, updateRequestCall, basePath,
                 entityName,
                 basePath, basePath);
 
@@ -470,6 +474,29 @@ public final class CrudGenerationService {
         }
         sb.append(")");
         return sb.toString();
+    }
+
+    private static String defaultConstructorCall(String className, List<PsiField> fields) {
+        StringBuilder sb = new StringBuilder("new ").append(className).append("(");
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(defaultValueFor(fields.get(i).getType()));
+        }
+        sb.append(")");
+        return sb.toString();
+    }
+
+    private static String defaultValueFor(PsiType type) {
+        return switch (type.getPresentableText()) {
+            case "String" -> "\"\"";
+            case "int", "Integer", "short", "Short", "byte", "Byte" -> "0";
+            case "long", "Long" -> "0L";
+            case "double", "Double" -> "0.0";
+            case "float", "Float" -> "0.0f";
+            case "boolean", "Boolean" -> "false";
+            case "char", "Character" -> "'\\0'";
+            default -> "null";
+        };
     }
 
     private static String entityPackage(PsiClass entityClass) {

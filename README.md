@@ -21,9 +21,9 @@ An IntelliJ IDEA plugin that improves developer productivity while building Spri
 
 ## Features
 
-### Generate CRUD
+### 1. Generate CRUD
 
-Right-click a JPA entity class and select **New → Generate CRUD** to scaffold a full CRUD REST API layer in one step.
+Right-click on a JPA entity class and select **New → Generate CRUD** to scaffold a full CRUD REST API layer in one step.
 
 **What gets generated:**
 
@@ -47,8 +47,6 @@ Right-click a JPA entity class and select **New → Generate CRUD** to scaffold 
 
 **How to use:**
 
-1. Open a JPA entity class (`@Entity`).
-2. Right-click in the editor or on the class in the Project view.
-3. Choose **New → Generate CRUD**.
-4. Review or adjust the fully-qualified class names for Controller, Service, and Repository in the dialog.
-5. Click **OK**.
+1. Right-click on a JPA Entity, choose **New → Generate CRUD**.
+2. Review or adjust the fully qualified class names for Controller, Service, and Repository in the dialog.
+3. Click **OK**.
